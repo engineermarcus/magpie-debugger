@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
     return res.end("ok");
   }
   if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard")) {
-    const html = fs.readFileSync(path.join(__dirname, "../dashboard/index.html"));
+    const html = fs.readFileSync(path.join(__dirname, "dashboard/index.html"));
     res.writeHead(200, { "Content-Type": "text/html" });
     return res.end(html);
   }
