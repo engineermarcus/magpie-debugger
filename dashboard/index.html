@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Magpie Debug</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0a; --surface: #111; --border: #1e1e1e;
+    --text: #e0e0e0; --muted: #555; --accent: #00ff88;
+    --error: #ff4466; --warn: #f5a623; --info: #4a9eff;
+    --fetch: #b388ff; --system: #555; --network: #ff6b6b;
+    --font: "JetBrains Mono", "Fira Mono", monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-shrink: 0; background: var(--surface); }
+  .logo { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
+  .dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.disconnected { background: var(--error); }
+  .spacer { flex: 1; }
+  .filters { display: flex; gap: 6px; }
+  .filter-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 3px 10px; border-radius: 3px; cursor: pointer; font-family: var(--font); font-size: 11px; transition: all 0.15s; }
+  .filter-btn.active { color: var(--text); border-color: var(--accent); background: rgba(0,255,136,0.06); }
+  .search-box { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 3px; font-family: var(--font); font-size: 11px; width: 180px; outline: none; }
+  .search-box:focus { border-color: var(--accent); }
+  .btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 12px; border-radius: 3px; cursor: pointer; font-family: var(--font); font-size: 11px; }
+  .btn:hover { border-color: var(--error); color: var(--error); }
+  .count { font-size: 11px; color: var(--muted); min-width: 60px; text-align: right; }
+
+  /* ── Log list ── */
+  #log-container { flex: 1; overflow-y: auto; padding: 4px 0; }
+  #log-container::-webkit-scrollbar { width: 4px; }
+  #log-container::-webkit-scrollbar-track { background: var(--bg); }
+  #log-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-entry { display: flex; gap: 10px; padding: 3px 16px; border-bottom: 1px solid rgba(255,255,255,0.02); cursor: pointer; transition: background 0.1s; font-size: 11.5px; line-height: 1.6; align-items: flex-start; }
+  .log-entry:hover { background: rgba(255,255,255,0.03); }
+  .log-entry.expanded { background: rgba(255,255,255,0.04); }
+  .log-entry.new-entry { animation: flashIn 0.4s ease; }
+  @keyframes flashIn { from { background: rgba(0,255,136,0.08); } to { background: transparent; } }
+
+  .ts { color: var(--muted); flex-shrink: 0; font-size: 10px; padding-top: 2px; min-width: 88px; }
+  .level-badge { flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 2px; min-width: 52px; text-align: center; text-transform: uppercase; }
+  .badge-error   { background: rgba(255,68,102,0.15);  color: var(--error); }
+  .badge-warn    { background: rgba(245,166,35,0.15);  color: var(--warn); }
+  .badge-info    { background: rgba(74,158,255,0.15);  color: var(--info); }
+  .badge-log     { background: rgba(224,224,224,0.08); color: #aaa; }
+  .badge-fetch   { background: rgba(179,136,255,0.15); color: var(--fetch); }
+  .badge-network { background: rgba(255,107,107,0.15); color: var(--network); }
+  .badge-system  { background: rgba(85,85,85,0.2);     color: var(--system); }
+
+  .log-type { flex-shrink: 0; font-size: 10px; color: var(--muted); min-width: 60px; padding-top: 2px; }
+  .log-msg { flex: 1; color: var(--text); white-space: pre-wrap; word-break: break-all; }
+  .log-msg.error-msg { color: var(--error); }
+  .log-msg.warn-msg  { color: var(--warn); }
+
+  .detail-pane { display: none; padding: 8px 16px 8px calc(16px + 88px + 62px + 70px + 10px*3); background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--border); }
+  .detail-pane.visible { display: block; }
+  .detail-pane pre { color: var(--muted); font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  .detail-key { color: var(--accent); }
+
+  /* ── Empty state ── */
+  #empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted); gap: 8px; }
+  #empty .big { font-size: 32px; }
+
+  /* ── Status bar ── */
+  footer { padding: 5px 16px; border-top: 1px solid var(--border); display: flex; gap: 16px; font-size: 10px; color: var(--muted); flex-shrink: 0; background: var(--surface); }
+  .stat { display: flex; gap: 4px; }
+  .stat-val { color: var(--text); }
+  .stat-val.e { color: var(--error); }
+  .stat-val.w { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">▸ MAGPIE DEBUG</div>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">connecting...</span>
+  </div>
+  <div class="spacer"></div>
+  <input class="search-box" id="search" placeholder="filter logs..." />
+  <div class="filters">
+    <button class="filter-btn active" data-filter="all">ALL</button>
+    <button class="filter-btn" data-filter="error">ERR</button>
+    <button class="filter-btn" data-filter="warn">WARN</button>
+    <button class="filter-btn" data-filter="fetch">FETCH</button>
+    <button class="filter-btn" data-filter="network">NET</button>
+    <button class="filter-btn" data-filter="log">LOG</button>
+  </div>
+  <div class="count" id="count">0 logs</div>
+  <button class="btn" id="clear-btn">CLEAR</button>
+  <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;">
+    <input type="checkbox" id="autoscroll" checked style="accent-color:var(--accent)"/> scroll
+  </label>
+</header>
+
+<div id="log-container">
+  <div id="empty"><div class="big">⬡</div><div>waiting for app connection...</div></div>
+</div>
+
+<footer>
+  <div class="stat">total <span class="stat-val" id="s-total">0</span></div>
+  <div class="stat">errors <span class="stat-val e" id="s-err">0</span></div>
+  <div class="stat">warns <span class="stat-val w" id="s-warn">0</span></div>
+  <div class="stat">fetches <span class="stat-val" id="s-fetch">0</span></div>
+  <div class="stat">app clients <span class="stat-val" id="s-clients">0</span></div>
+</footer>
+
+<script>
+const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/dashboard`;
+let allLogs = [];
+let filter = "all";
+let searchQ = "";
+let stats = { total: 0, errors: 0, warns: 0, fetches: 0, clients: 0 };
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let ws, reconnectTimer;
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    setStatus("connected");
+    clearTimeout(reconnectTimer);
+  };
+  ws.onclose = () => {
+    setStatus("disconnected");
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "history") { allLogs = msg.logs; renderAll(); return; }
+    if (msg.type === "clear")   { allLogs = []; renderAll(); resetStats(); return; }
+    if (msg.type === "clients") { stats.clients = msg.count; updateStats(); return; }
+    addLogEntry(msg, true);
+  };
+}
+
+function setStatus(s) {
+  const dot = document.getElementById("dot");
+  const txt = document.getElementById("status-text");
+  dot.className = "dot " + s;
+  txt.textContent = s;
+}
+
+// ── Log rendering ─────────────────────────────────────────────────────────────
+const container = document.getElementById("log-container");
+const empty = document.getElementById("empty");
+
+function formatTs(ts) {
+  if (!ts) return "--:--:--";
+  const d = new Date(ts);
+  return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+
+function levelBadge(level) {
+  const l = (level || "log").toLowerCase();
+  return `<span class="level-badge badge-${l}">${l}</span>`;
+}
+
+function logMatches(log) {
+  if (filter !== "all") {
+    const t = (log.type || "").toLowerCase();
+    const l = (log.level || "log").toLowerCase();
+    if (filter === "error"   && l !== "error")   return false;
+    if (filter === "warn"    && l !== "warn")     return false;
+    if (filter === "fetch"   && t !== "fetch")    return false;
+    if (filter === "network" && t !== "network")  return false;
+    if (filter === "log"     && !["log","info"].includes(l)) return false;
+  }
+  if (searchQ) {
+    const hay = JSON.stringify(log).toLowerCase();
+    if (!hay.includes(searchQ.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function buildEntryEl(log, animate = false) {
+  const entry = document.createElement("div");
+  entry.className = "log-entry" + (animate ? " new-entry" : "");
+  const level = (log.level || "log").toLowerCase();
+  const msgClass = level === "error" ? "error-msg" : level === "warn" ? "warn-msg" : "";
+
+  let msg = log.message || "";
+  if (log.type === "fetch") {
+    msg = `${log.method || "GET"} ${log.url}  →  ${log.status ?? "?"} ${log.statusText || ""}${log.duration ? `  (${log.duration}ms)` : ""}`;
+  }
+  if (log.type === "network" && log.error) {
+    msg = `FAILED ${log.method || "GET"} ${log.url}  →  ${log.error}`;
+  }
+
+  entry.innerHTML = `
+    <div class="ts">${formatTs(log.ts)}</div>
+    ${levelBadge(log.level || (log.type === "fetch" ? "fetch" : log.type === "network" ? "network" : "log"))}
+    <div class="log-type">${log.type || "console"}</div>
+    <div class="log-msg ${msgClass}">${escHtml(String(msg).slice(0, 400))}</div>
+  `;
+
+  // Detail pane on click
+  const detail = document.createElement("div");
+  detail.className = "detail-pane";
+  detail.innerHTML = `<pre>${syntaxHighlight(JSON.stringify(log, null, 2))}</pre>`;
+
+  entry.addEventListener("click", () => {
+    const open = detail.classList.toggle("visible");
+    entry.classList.toggle("expanded", open);
+  });
+
+  return { entry, detail };
+}
+
+function renderAll() {
+  container.innerHTML = "";
+  resetStats();
+  const visible = allLogs.filter(logMatches);
+  if (visible.length === 0) {
+    container.appendChild(empty);
+  } else {
+    const frag = document.createDocumentFragment();
+    for (const log of visible) {
+      const { entry, detail } = buildEntryEl(log);
+      frag.appendChild(entry);
+      frag.appendChild(detail);
+      tickStats(log);
+    }
+    container.appendChild(frag);
+  }
+  updateCount(visible.length);
+  if (document.getElementById("autoscroll").checked) container.scrollTop = container.scrollHeight;
+}
+
+function addLogEntry(log, animate = false) {
+  allLogs.push(log);
+  tickStats(log);
+  if (!logMatches(log)) return;
+  if (container.contains(empty)) empty.remove();
+  const { entry, detail } = buildEntryEl(log, animate);
+  container.appendChild(entry);
+  container.appendChild(detail);
+  updateCount();
+  if (document.getElementById("autoscroll").checked) container.scrollTop = container.scrollHeight;
+}
+
+function tickStats(log) {
+  stats.total++;
+  const l = (log.level || "").toLowerCase();
+  const t = (log.type  || "").toLowerCase();
+  if (l === "error" || t === "network") stats.errors++;
+  if (l === "warn") stats.warns++;
+  if (t === "fetch") stats.fetches++;
+  updateStats();
+}
+
+function resetStats() { stats = { total: 0, errors: 0, warns: 0, fetches: 0, clients: stats.clients }; updateStats(); }
+
+function updateStats() {
+  document.getElementById("s-total").textContent  = stats.total;
+  document.getElementById("s-err").textContent    = stats.errors;
+  document.getElementById("s-warn").textContent   = stats.warns;
+  document.getElementById("s-fetch").textContent  = stats.fetches;
+  document.getElementById("s-clients").textContent = stats.clients;
+}
+
+function updateCount(n) {
+  const c = n !== undefined ? n : container.querySelectorAll(".log-entry").length;
+  document.getElementById("count").textContent = c + " logs";
+}
+
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function syntaxHighlight(json) {
+  return escHtml(json).replace(/"([^"]+)":/g, '<span class="detail-key">"$1"</span>:');
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+document.querySelectorAll(".filter-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    filter = btn.dataset.filter;
+    renderAll();
+  });
+});
+
+document.getElementById("search").addEventListener("input", e => {
+  searchQ = e.target.value;
+  renderAll();
+});
+
+document.getElementById("clear-btn").addEventListener("click", () => {
+  ws.send(JSON.stringify({ type: "clear" }));
+});
+
+connect();
+</script>
+</body>
+</html>
